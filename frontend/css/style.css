@@ -172,7 +172,8 @@ code, pre, .mono { font-family: var(--mono); }
 .grid { display: grid; gap: 16px; }
 .grid.cols-2 { grid-template-columns: 1fr 1fr; }
 .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
-@media (max-width: 900px) { .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; } }
+.grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 900px) { .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; } }
 
 /* ---------- 表格 ---------- */
 table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -434,3 +435,43 @@ input[type="text"], input[type="number"], select, textarea.plain {
 }
 input:focus, select:focus, textarea:focus { border-color: var(--primary); }
 kbd { background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 6px; font-size: 11px; font-family: var(--mono); }
+
+/* ---------- 代码复杂度 ---------- */
+.cx-tile.hot { background: var(--primary-soft); }
+.cx-tile .v { font-size: 20px; }
+.cx-tbl { font-size: 12.5px; min-width: 980px; }
+.cx-tbl th, .cx-tbl td { padding: 7px 8px; vertical-align: middle; }
+.cx-tbl .cx-toggle { width: 26px; text-align: center; color: var(--text-faint); }
+.cx-fn-row { cursor: pointer; }
+.cx-fn-row .tri { display: inline-block; transition: transform .12s; font-size: 11px; }
+.cx-fn-row.open .tri { transform: rotate(90deg); }
+.cx-cc {
+  display: inline-grid; place-items: center; min-width: 30px; height: 24px;
+  padding: 0 7px; border-radius: 20px; font-weight: 700; font-size: 13px;
+  background: var(--surface-3); color: var(--text);
+}
+.cx-cc.low { background: var(--success-soft); color: var(--success); }
+.cx-cc.moderate { background: var(--warning-soft); color: var(--warning); }
+.cx-cc.high, .cx-cc.critical { background: var(--danger-soft); color: var(--danger); }
+.cx-detail-row td { background: var(--surface-2); }
+.cx-detail { display: grid; grid-template-columns: 1.2fr 1fr; gap: 18px; padding: 8px 6px 10px; }
+@media (max-width: 1000px) { .cx-detail { grid-template-columns: 1fr; } }
+.cx-detail-title { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+.cx-point {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 4px 8px; border-left: 3px solid var(--border-strong);
+  margin-bottom: 4px; background: var(--surface); border-radius: 0 5px 5px 0; font-size: 12.5px;
+}
+.cx-point.branch { border-left-color: var(--primary); }
+.cx-point.loop { border-left-color: var(--accent); }
+.cx-point.logical { border-left-color: var(--warning); }
+.cx-point .ico { width: 18px; }
+.cx-point .plabel { font-weight: 600; }
+.cx-point .pdepth { color: var(--text-faint); font-size: 11.5px; }
+.cx-point .pnote { font-size: 11.5px; flex-basis: 100%; padding-left: 26px; }
+.cx-detail-empty { font-size: 12.5px; padding: 6px 0; }
+.cx-cfg-line { font-size: 12px; background: var(--surface); border-radius: 6px; padding: 8px 10px; color: var(--text-muted); line-height: 1.9; }
+.cx-method { margin: 0; padding-left: 20px; font-size: 13px; color: var(--text-muted); }
+.cx-method li { margin-bottom: 8px; line-height: 1.65; }
+.cx-method b { color: var(--text); }
+.cx-method code { color: var(--primary); background: var(--surface-2); padding: 0 5px; border-radius: 4px; font-size: 12px; }

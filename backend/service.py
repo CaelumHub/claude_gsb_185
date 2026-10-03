@@ -27,6 +27,7 @@ from . import debugger as debugger_mod
 from . import profiler as profiler_mod
 from . import diagnostics as diag
 from . import memory_model
+from . import complexity as complexity_mod
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +249,13 @@ class Service:
             view["bytecode"] = result.bytecode.to_dict()
             view["bytecode"]["functions"].reverse()
         return view
+
+    # ==================================================================
+    # 代码复杂度
+    # ==================================================================
+    def complexity(self, source):
+        """计算每个函数的圈复杂度/嵌套深度/行数等指标及整体统计。"""
+        return complexity_mod.analyze_source(source)
 
     # ==================================================================
     # 运行（普通 / 性能剖析）

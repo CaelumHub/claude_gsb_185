@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>代码复杂度分析 · MiniLang 平台</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <div class="content">
+      <div class="flex wrap between mb">
+        <div class="flex wrap" style="gap:8px">
+          <select id="sample"></select>
+          <button class="btn sm" id="btn-loadproj">📂 载入项目源码</button>
+        </div>
+        <button class="btn primary" id="btn-analyze">🧮 计算复杂度</button>
+      </div>
+
+      <div id="editor"></div>
+
+      <div id="status" class="mt" style="min-height:24px"></div>
+
+      <!-- 整体统计 -->
+      <div class="grid cols-4 mt" id="summary" style="display:none"></div>
+
+      <!-- 复杂度分布与说明 -->
+      <div class="grid cols-2 mt" id="dist-grid" style="display:none">
+        <div class="card">
+          <h2>📊 圈复杂度分布（用户函数）</h2>
+          <div class="desc">McCabe 经验阈值：1–5 简单 · 6–10 中等 · 11–20 复杂 · &gt;20 高风险</div>
+          <div id="dist-bars"></div>
+        </div>
+        <div class="card">
+          <h2>🔁 递归与结构概览</h2>
+          <div id="recur-out"></div>
+        </div>
+      </div>
+
+      <!-- 函数明细表 -->
+      <div class="card mt" id="fn-card" style="display:none">
+        <div class="flex between">
+          <h2>📋 每个函数的复杂度指标</h2>
+          <div id="cross-check" class="muted" style="font-size:12px"></div>
+        </div>
+        <div class="desc">圈复杂度同时用 <b>AST 决策点</b>（每个 if/elif、循环、&amp;&amp;/|| +1）与 <b>字节码控制流图 E−N+2</b> 两种方式计算并交叉校验；展开行可查看决策点明细。</div>
+        <div style="overflow:auto">
+          <table class="tbl cx-tbl">
+            <thead><tr>
+              <th></th>
+              <th>函数</th>
+              <th class="num" title="McCabe 圈复杂度（AST 决策点口径）">圈复杂度</th>
+              <th class="num" title="字节码控制流图 E-N+2 交叉校验值">字节码校验</th>
+              <th>风险</th>
+              <th class="num" title="控制结构最大嵌套深度">最大嵌套</th>
+              <th class="num">物理行</th>
+              <th class="num" title="有效代码行（不含空行与纯注释行）">SLOC</th>
+              <th class="num">注释</th>
+              <th class="num">空行</th>
+              <th class="num">语句</th>
+              <th class="num">参数</th>
+              <th class="num">调用</th>
+              <th class="num" title="字节码基本块 / 指令数">块/指令</th>
+              <th>递归</th>
+            </tr></thead>
+            <tbody id="fn-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 计算口径 -->
+      <div class="card" id="method-card" style="display:none">
+        <h2>📐 指标是怎么算出来的</h2>
+        <div class="desc">全部指标基于编译器既有的词法 token、AST 与字节码控制流，不做文本猜测。</div>
+        <ul class="cx-method">
+          <li><b>圈复杂度（Cyclomatic Complexity）</b>：McCabe 定义。在函数的控制流图上 <code>V(G) = E − N + 2</code>（函数单入口单出口，P=1）。本页直接把代码生成器产出的字节码切成基本块、连出真实的条件跳转/回边后计算；每个 <code>if/elif</code> 条件、<code>while/for</code> 循环、以及 <code>&amp;&amp;/||</code> 的短路跳转都增加一条独立的边。<code>else</code> 不增加复杂度。</li>
+          <li><b>最大嵌套深度</b>：沿 AST 统计 if / while / for 代码块相互嵌套的最大层数（函数体本身为第 0 层），多层嵌套会被如实计入。</li>
+          <li><b>行数</b>：物理行 = 函数 <code>{</code> 到配对 <code>}</code> 的跨度；有效代码行（SLOC）= 词法分析后含 token 的行；纯注释行（<code>//</code>、<code>/* */</code>）与空行单独统计。</li>
+          <li><b>语句数 / 参数数 / 调用数</b>：遍历 AST 统计；<code>print</code> 等内置调用会在展开明细中标注。</li>
+          <li><b>递归</b>：在「用户函数 → 用户函数」调用图上用 Tarjan 强连通分量识别——自环是<b>直接递归</b>，多点成环是<b>互相（间接）递归</b>，并给出调用环。</li>
+        </ul>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/common.js"></script>
+<script src="js/editor.js"></script>
+<script>
+(function () {
+  ML.Shell.render("complexity");
+  ML.Shell.setTitle("代码复杂度分析");
+
+  const editor = new ML.CodeEditor(document.getElementById("editor"), {
+    value: ML.store.get("draft_source", ML.SAMPLES[2].code), height: 240,
+  });
+  editor.onValueChange = (v) => ML.store.set("draft_source", v);
+
+  const sampleSel = document.getElementById("sample");
+  sampleSel.innerHTML = '<option value="">— 载入示例 —</option>' +
+    ML.SAMPLES.map((s, i) => `<option value="${i}">${ML.escapeHtml(s.name)}</option>`).join("");
+  sampleSel.onchange = () => { if (sampleSel.value !== "") { editor.setValue(ML.SAMPLES[+sampleSel.value].code); sampleSel.value = ""; } };
+  document.getElementById("btn-loadproj").onclick = async () => editor.setValue(await ML.Shell.loadSource(ML.DEFAULT_CODE));
+
+  const esc = ML.escapeHtml;
+
+  const RISK = {
+    low:      { label: "简单",   cls: "green", bar: "var(--success)" },
+    moderate: { label: "中等",   cls: "amber", bar: "var(--warning)" },
+    high:     { label: "复杂",   cls: "red",   bar: "var(--danger)" },
+    critical: { label: "高风险", cls: "red",   bar: "var(--danger)" },
+  };
+  const RISK_KEYS = ["low", "moderate", "high", "critical"];
+  const RISK_NAMES = { low: "简单 1–5", moderate: "中等 6–10", high: "复杂 11–20", critical: "高风险 >20" };
+
+  const KIND_META = {
+    branch:  { icon: "🔀", name: "条件分支" },
+    loop:    { icon: "🔁", name: "循环" },
+    logical: { icon: "⚡", name: "短路逻辑" },
+  };
+
+  function tile(v, k, tone) {
+    return `<div class="stat-tile cx-tile${tone ? " " + tone : ""}"><div class="v">${v}</div><div class="k">${k}</div></div>`;
+  }
+
+  function renderSummary(s) {
+    document.getElementById("summary").style.display = "grid";
+    const maxFn = s.most_complex || {};
+    const deep = s.deepest || {};
+    document.getElementById("summary").innerHTML =
+      tile(s.function_count, "用户函数数") +
+      tile(s.total_code_lines, "有效代码行 (SLOC)") +
+      tile(s.total_cyclomatic, "圈复杂度总和") +
+      `<div class="stat-tile cx-tile hot"><div class="v">${s.max_cyclomatic}</div><div class="k">最高圈复杂度 · ${esc(maxFn.name || "—")}</div></div>` +
+      tile(s.avg_cyclomatic_user, "函数平均圈复杂度") +
+      tile(s.max_nesting_depth, `最大嵌套深度 · ${esc(deep.name || "—")}`) +
+      tile(s.total_loops, "循环总数") +
+      tile(s.recursive_count, "递归函数数");
+
+    // 分布条形图
+    const d = s.distribution || {};
+    const maxV = Math.max(1, ...RISK_KEYS.map((k) => d[k] || 0));
+    document.getElementById("dist-bars").innerHTML = RISK_KEYS.map((k) => {
+      const v = d[k] || 0;
+      const pct = (v / maxV) * 100;
+      return `<div class="bar-row">
+        <div class="lbl" style="width:110px"><span class="badge ${RISK[k].cls}">${RISK_NAMES[k]}</span></div>
+        <div class="track"><div class="fill" style="width:${pct}%;background:${RISK[k].bar}"></div></div>
+        <div class="pct" style="width:34px">${v} 个</div>
+      </div>`;
+    }).join("");
+
+    // 递归概览
+    const rec = (s.recursive_functions || []);
+    let recHtml;
+    if (!rec.length) {
+      recHtml = ML.empty("未检测到递归函数");
+    } else {
+      recHtml = `<div class="muted" style="font-size:12.5px;margin-bottom:8px">基于函数调用图的强连通分量（Tarjan）识别，直接递归与互相递归都会标出调用环：</div>`;
+      recHtml = recHtml + rec.map((n) => `<span class="badge purple" style="font-family:var(--mono);margin:0 6px 6px 0">↩ ${esc(n)}</span>`).join("");
+    }
+    document.getElementById("recur-out").innerHTML = recHtml +
+      `<div class="flex wrap" style="gap:14px;margin-top:10px;font-size:12.5px;color:var(--text-muted)">
+        <span>物理行 <b style="color:var(--text)">${s.total_physical_lines}</b></span>
+        <span>注释行 <b style="color:var(--text)">${s.total_comment_lines}</b></span>
+        <span>空行 <b style="color:var(--text)">${s.total_blank_lines}</b></span>
+        <span>语句 <b style="color:var(--text)">${s.total_statements}</b></span>
+        <span>字节码指令 <b style="color:var(--text)">${s.total_instructions}</b></span>
+      </div>`;
+    document.getElementById("dist-grid").style.display = "grid";
+  }
+
+  function ccCell(f) {
+    const r = RISK[f.risk] || RISK.low;
+    return `<span class="cx-cc ${f.risk}" title="McCabe 圈复杂度">${f.cyclomatic}</span>`;
+  }
+
+  function recursionCell(f) {
+    if (!f.recursive) return '<span class="muted">—</span>';
+    if (f.recursion_kind === "direct") {
+      return `<span class="badge purple" title="直接递归：${esc(f.name)} → ${esc(f.name)}">↩ 直接</span>`;
+    }
+    const cyc = (f.recursion_cycle || []).map(esc).join(" → ");
+    return `<span class="badge blue" title="互相递归：${cyc}">🔗 互相</span>`;
+  }
+
+  function detailRowHtml(f) {
+    const pts = f.decision_points || [];
+    let rows = "";
+    if (!pts.length) {
+      rows = `<div class="muted cx-detail-empty">该函数没有任何分支/循环/短路逻辑，圈复杂度为基数 1。</div>`;
+    } else {
+      rows = pts.map((p) => {
+        const meta = KIND_META[p.kind] || { icon: "•", name: p.kind };
+        const depthPips = "├─".repeat(Math.max(0, p.nesting - 1));
+        return `<div class="cx-point ${p.kind}">
+          <span class="ico">${meta.icon}</span>
+          <span class="plabel">${esc(p.label)}</span>
+          <span class="pdepth mono">${depthPips}L${p.line} · 嵌套第 ${p.nesting} 层</span>
+          <span class="pnote muted">${esc(p.note)}</span>
+        </div>`;
+      }).join("");
+    }
+    const calls = (f.calls || []).map((c) => {
+      const cls = c.builtin ? "gray" : (c.callee === f.name ? "purple" : "cyan");
+      const name = c.callee || "(动态调用)";
+      return `<span class="badge ${cls}" style="font-family:var(--mono);margin:0 4px 4px 0">${esc(name)}<span class="muted"> ·L${c.line}</span></span>`;
+    }).join("") || '<span class="muted">无调用</span>';
+
+    return `<tr class="cx-detail-row"><td colspan="15">
+      <div class="cx-detail">
+        <div class="cx-detail-col">
+          <div class="cx-detail-title">决策点（${pts.length} 个，圈复杂度 = ${pts.length} + 1 = ${f.cyclomatic}）</div>
+          ${rows}
+        </div>
+        <div class="cx-detail-col">
+          <div class="cx-detail-title">字节码控制流图交叉校验</div>
+          <div class="mono cx-cfg-line">
+            基本块 ${f.cfg.blocks} · 边 E=${f.cfg.edges} · 节点 N=${f.cfg.nodes}（含合成出口）<br>
+            ${esc(f.cfg.formula)}
+            ${f.cc_match ? '<span class="badge green" style="margin-left:8px">✔ 与 AST 口径一致</span>'
+                         : '<span class="badge red" style="margin-left:8px">✘ 与 AST 口径不一致</span>'}
+          </div>
+          <div class="cx-detail-title" style="margin-top:10px">调用（${f.call_count}）</div>
+          <div>${calls}</div>
+        </div>
+      </div>
+    </td></tr>`;
+  }
+
+  function renderFunctions(fns) {
+    document.getElementById("fn-card").style.display = "block";
+    document.getElementById("method-card").style.display = "block";
+    const body = document.getElementById("fn-body");
+    body.innerHTML = fns.map((f, idx) => {
+      const r = RISK[f.risk] || RISK.low;
+      const name = f.is_main
+        ? '<span class="muted">&lt;main&gt;（顶层语句）</span>'
+        : `<b>${esc(f.name)}</b>(${esc(f.params.join(", "))})`;
+      const loc = `${f.location.start_line}–${f.location.end_line}`;
+      const bcMatch = f.cc_match
+        ? `<span class="badge green" style="font-family:var(--mono)">${f.cyclomatic_bytecode} ✔</span>`
+        : `<span class="badge red" style="font-family:var(--mono)">${f.cyclomatic_bytecode == null ? "—" : f.cyclomatic_bytecode} ✘</span>`;
+      return `<tr class="cx-fn-row" data-i="${idx}">
+        <td class="cx-toggle"><span class="tri">▸</span></td>
+        <td class="mono">${name}<div class="muted" style="font-size:11px">L${loc}</div></td>
+        <td class="num">${ccCell(f)}</td>
+        <td class="num">${bcMatch}</td>
+        <td><span class="badge ${r.cls}">${r.label}</span></td>
+        <td class="num">${f.max_nesting_depth}</td>
+        <td class="num">${f.lines.total}</td>
+        <td class="num"><b>${f.lines.code}</b></td>
+        <td class="num muted">${f.lines.comment}</td>
+        <td class="num muted">${f.lines.blank}</td>
+        <td class="num">${f.statement_count}</td>
+        <td class="num">${f.param_count}</td>
+        <td class="num">${f.call_count}</td>
+        <td class="num muted">${f.cfg.blocks}/${f.cfg.instructions}</td>
+        <td>${recursionCell(f)}</td>
+      </tr>${detailRowHtml(f)}`;
+    }).join("");
+
+    // 明细行默认隐藏；点击函数行展开/折叠
+    body.querySelectorAll(".cx-detail-row").forEach((r2) => { r2.style.display = "none"; });
+    body.querySelectorAll(".cx-fn-row").forEach((row) => {
+      row.onclick = () => {
+        const detail = row.nextElementSibling;
+        const open = row.classList.toggle("open");
+        detail.classList.toggle("open", open);
+        detail.style.display = open ? "" : "none";
+      };
+    });
+  }
+
+  async function analyze() {
+    const code = editor.getValue();
+    document.getElementById("fn-card").style.display = "none";
+    document.getElementById("method-card").style.display = "none";
+    document.getElementById("summary").style.display = "none";
+    document.getElementById("dist-grid").style.display = "none";
+    const statusEl = document.getElementById("status");
+
+    const data = await ML.api.complexity(code);
+    const r = data.result || {};
+    if (!r.ok) {
+      statusEl.innerHTML = `<span class="badge red">编译未通过</span>
+        <span class="muted" style="margin-left:8px;font-size:12.5px">复杂度分析基于 AST 与字节码，请先修复语法/语义错误（已进行到「${esc(r.stage || "?")}」阶段）· <a href="diagnostics.html">前往诊断页</a></span>`;
+      return;
+    }
+    statusEl.innerHTML = `<span class="badge green">分析完成</span>
+      <span class="muted" style="margin-left:8px;font-size:12.5px">${(r.functions || []).filter((f) => !f.is_main).length} 个用户函数 · 点击任意函数行展开决策点与控制流图明细</span>`;
+    renderSummary(r.summary || {});
+    renderFunctions(r.functions || []);
+    const s = r.summary || {};
+    document.getElementById("cross-check").innerHTML = s.cc_cross_check_ok
+      ? '✔ AST 与字节码两种口径交叉校验全部一致'
+      : '✘ 存在口径不一致的函数，请查看明细';
+  }
+
+  document.getElementById("btn-analyze").onclick = analyze;
+  analyze();
+})();
+</script>
+</body>
+</html>

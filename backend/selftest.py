@@ -45,6 +45,7 @@ def run_all():
     _test_lexer()
     _test_parser()
     _test_semantic()
+    _test_complexity()
     _test_vm_basic()
     _test_functions_recursion()
     _test_control_flow()
@@ -98,6 +99,77 @@ def _test_semantic():
     ok2 = any("2 个参数" in e.message or "需要 2" in e.message for e in errs2)
     _check("语义分析：参数个数不匹配报错", ok2,
            str([e.message for e in errs2]) if not ok2 else "")
+
+
+def _test_complexity():
+    from . import complexity
+
+    def fn(report, name):
+        return next(f for f in report["functions"] if f["name"] == name)
+
+    # 多层嵌套 + elif + 短路 && / || + while：AST 与字节码两种口径必须一致
+    src = (
+        "func g(x, y) {\n"
+        "    if (x > 0 && y > 0 || x < 0) {\n"
+        "        while (x > 0) {\n"
+        "            if (y == 1) { return 1; } elif (y == 2) { return 2; }\n"
+        "            x = x - 1;\n"
+        "        }\n"
+        "    }\n"
+        "    return 0;\n"
+        "}\n"
+    )
+    rep = complexity.analyze_source(src)
+    g = fn(rep, "g")
+    # 决策点：if 1 + && 1 + || 1 + while 1 + if 1 + elif 1 = 6 -> CC 7
+    ok_ast = g["cyclomatic"] == 7 and g["decision_count"] == 6
+    ok_bc = g["cyclomatic_bytecode"] == 7 and g["cc_match"]
+    ok_depth = g["max_nesting_depth"] == 3  # if -> while -> if
+    _check("复杂度：嵌套/elif/短路/循环的圈复杂度（AST 口径）", ok_ast,
+           f"cc={g['cyclomatic']} decisions={g['decision_count']}")
+    _check("复杂度：字节码控制流图 E-N+2 与 AST 交叉一致", ok_bc and ok_depth,
+           f"bc={g['cyclomatic_bytecode']} depth={g['max_nesting_depth']} cfg={g['cfg']}")
+
+    # 直接递归
+    fib = "func fib(n) { if (n < 2) { return n; } return fib(n-1) + fib(n-2); }"
+    rep = complexity.analyze_source(fib)
+    f = fn(rep, "fib")
+    _check("复杂度：识别直接递归并统计自调用", f["recursive"] and f["recursion_kind"] == "direct"
+           and f["call_count"] == 2, str((f["recursive"], f["recursion_kind"], f["call_count"])))
+
+    # 互相递归（Tarjan SCC）
+    mutual = ("func a(n) { if (n == 0) { return true; } return b(n - 1); }\n"
+              "func b(n) { if (n == 0) { return false; } return a(n - 1); }\n")
+    rep = complexity.analyze_source(mutual)
+    fa, fb = fn(rep, "a"), fn(rep, "b")
+    _check("复杂度：识别互相递归调用环",
+           fa["recursive"] and fb["recursive"] and fa["recursion_kind"] == "mutual"
+           and set(fa["recursion_cycle"]) == {"a", "b"},
+           str(fa["recursion_cycle"]))
+
+    # 行数：物理行 / SLOC / 注释 / 空行
+    with_lines = (
+        "// 头注释\n"
+        "func h() {\n"
+        "    /* 块\n"
+        "       注释 */\n"
+        "    var x = 1;  // 尾部\n"
+        "\n"
+        "    return x;\n"
+        "}\n"
+    )
+    rep = complexity.analyze_source(with_lines)
+    h = fn(rep, "h")
+    ls = h["lines"]
+    _check("复杂度：物理行/SLOC/注释行/空行统计",
+           ls["total"] == 7 and ls["code"] == 4 and ls["comment"] == 2 and ls["blank"] == 1,
+           str(ls))
+
+    # 无分支函数 CC=1；编译失败时 ok=False
+    rep = complexity.analyze_source("func nop() { }")
+    _check("复杂度：直线函数圈复杂度为 1", fn(rep, "nop")["cyclomatic"] == 1)
+    rep = complexity.analyze_source("var x = ;")
+    _check("复杂度：编译失败时安全返回 ok=False", rep["ok"] is False)
 
 
 def _test_vm_basic():
