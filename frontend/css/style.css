@@ -347,6 +347,38 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .stat-tile .v { font-size: 22px; font-weight: 700; font-family: var(--mono); }
 .stat-tile .k { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
+/* ---------- 代码复杂度 ---------- */
+.cx-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cx-table th, .cx-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+.cx-table th { color: var(--text-muted); font-weight: 600; font-size: 12px; background: var(--surface-2); }
+.cx-table td.num, .cx-table th.num { text-align: right; font-family: var(--mono); }
+.cx-table tr:hover td { background: var(--surface-2); }
+.cx-table tr.row-high td { background: var(--danger-soft); }
+.cx-table tr.row-medium td { background: var(--warning-soft); }
+.cx-table td.fnname { font-family: var(--mono); font-weight: 600; cursor: pointer; }
+.cx-table td.fnname:hover { color: var(--primary); }
+.cx-table .nest-dots { display: inline-flex; gap: 2px; vertical-align: middle; }
+.cx-table .nest-dots i { width: 7px; height: 14px; border-radius: 2px; background: var(--border-strong); display: inline-block; }
+.cx-table .nest-dots i.on { background: var(--primary); }
+.cx-vg { display: inline-block; min-width: 26px; text-align: center; padding: 2px 8px; border-radius: 20px; font-family: var(--mono); font-weight: 700; }
+.cx-vg.low { background: var(--success-soft); color: var(--success); }
+.cx-vg.medium { background: var(--warning-soft); color: var(--warning); }
+.cx-vg.high { background: var(--danger-soft); color: var(--danger); }
+.cx-detail { margin: 0 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.cx-detail > tbody > tr > td { background: var(--surface); padding: 10px 14px; }
+.cx-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.cx-chip { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border); }
+.cx-chip.branch { border-color: var(--primary); color: var(--primary); }
+.cx-chip.loop { border-color: var(--accent); color: var(--accent); }
+.cx-chip.logical { border-color: var(--warning); color: var(--warning); }
+.cx-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.cx-bar-row .lbl { width: 170px; font-family: var(--mono); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cx-bar-row .track { flex: 1; height: 16px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.cx-bar-row .fill { height: 100%; border-radius: 4px; background: var(--success); transition: width .3s; }
+.cx-bar-row .fill.medium { background: var(--warning); }
+.cx-bar-row .fill.high { background: var(--danger); }
+.cx-bar-row .pct { width: 110px; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+
 /* ---------- 内存模型 ---------- */
 .mem-stack .frame { border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; }
 .mem-stack .frame .fn { background: var(--surface-2); padding: 5px 10px; font-family: var(--mono); font-size: 12px; font-weight: 600; }

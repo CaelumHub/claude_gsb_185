@@ -55,6 +55,7 @@ def run_all():
     _test_memory_model()
     _test_storage()
     _test_concurrent_writes()
+    _test_complexity()
     _test_full_pipeline()
 
     passed = 0
@@ -235,6 +236,111 @@ def _test_concurrent_writes():
         t.join()
     final = storage.read_json(path)["count"]
     _check("存储：8 线程并发累加 1600 次无丢失", final == 1600 and not errors, f"count={final}")
+
+
+def _test_complexity():
+    from . import complexity
+
+    def analyze(src):
+        res = compiler.compile_source(src)
+        assert res.success, "测试源码应编译通过"
+        return complexity.analyze(res)
+
+    def by_name(rep, name):
+        return next(f for f in rep["functions"] if f["name"] == name)
+
+    # 1) 线性函数：圈复杂度 1；CFG 公式与谓词计数对账一致
+    rep = analyze("func id(x) { return x; }\nprint(id(1));")
+    fid = by_name(rep, "id")
+    _check("复杂度：线性函数 v(G)=1 且 E−N+2 对账一致",
+           fid["cyclomatic"] == 1 and fid["cyclomatic_cfg"] == 1
+           and fid["metrics_consistent"], str((fid["cyclomatic"], fid["cyclomatic_cfg"])))
+
+    # 2) if/elif/else：3 个条件分支谓词 -> v(G)=4
+    src = ("func grade(s) {\n"
+           "    if (s >= 90) { return 1; }\n"
+           "    elif (s >= 80) { return 2; }\n"
+           "    elif (s >= 60) { return 3; }\n"
+           "    else { return 4; }\n"
+           "}\nprint(grade(75));")
+    rep = analyze(src)
+    g = by_name(rep, "grade")
+    _check("复杂度：if-elif-else 三分支 v(G)=4",
+           g["cyclomatic"] == 4 and g["if_branches"] == 3 and g["metrics_consistent"],
+           str(g["cyclomatic"]))
+
+    # 3) 多层嵌套 + 短路逻辑：nest=3，&&/|| 各贡献一个谓词
+    src = ("func f(a) {\n"
+           "    for (var i = 0; i < 2; i = i + 1) {\n"
+           "        for (var j = 0; j < 2; j = j + 1) {\n"
+           "            if (a && i || j) { print(i); }\n"
+           "        }\n"
+           "    }\n"
+           "}\nf(1);")
+    rep = analyze(src)
+    f3 = by_name(rep, "f")
+    _check("复杂度：双层 for+if 嵌套深度 3，短路运算符计入谓词",
+           f3["max_nesting"] == 3 and f3["logical_count"] == 2
+           and f3["cyclomatic"] == 6 and f3["metrics_consistent"],
+           str((f3["max_nesting"], f3["logical_count"], f3["cyclomatic"])))
+
+    # 4) 循环：while 与 for 各贡献 1；break/continue 是无条件跳转，不增加 v(G)
+    src = ("func f(n) {\n"
+           "    var i = 0;\n"
+           "    while (i < n) {\n"
+           "        if (i == 2) { break; }\n"
+           "        if (i == 1) { continue; }\n"
+           "        i = i + 1;\n"
+           "    }\n"
+           "    return i;\n"
+           "}\nprint(f(5));")
+    rep = analyze(src)
+    fw = by_name(rep, "f")
+    _check("复杂度：while+两个 if 的 v(G)=4，break/continue 单独计数",
+           fw["cyclomatic"] == 4 and fw["loop_count"] == 1
+           and fw["break_count"] == 1 and fw["continue_count"] == 1,
+           str(fw["cyclomatic"]))
+
+    # 5) 直接递归 + 相互递归识别
+    src = ("func fib(n) { if (n < 2) { return n; } return fib(n-1) + fib(n-2); }\n"
+           "func isOdd(n) { if (n == 0) { return false; } return isEven(n - 1); }\n"
+           "func isEven(n) { if (n == 0) { return true; } return isOdd(n - 1); }\n"
+           "print(fib(5), isOdd(3));")
+    rep = analyze(src)
+    fib = by_name(rep, "fib")
+    odd = by_name(rep, "isOdd")
+    even = by_name(rep, "isEven")
+    ok_rec = (fib["recursion_type"] == "direct"
+              and odd["recursion_type"] == "mutual"
+              and set(odd["recursion_cycle"]) == {"isOdd", "isEven"}
+              and even["recursion_type"] == "mutual"
+              and any(c["name"] == "fib" and c["count"] == 2 for c in fib["calls"]))
+    _check("复杂度：直接递归（fib）与相互递归（isOdd/isEven）识别", ok_rec,
+           str((fib["recursion_type"], odd["recursion_cycle"])))
+
+    # 6) 行数：物理行含注释空行，SLOC 扣除二者
+    src = ("// header\n"
+           "func f(a) {\n"
+           "\n"
+           "    /* inline */\n"
+           "    return a;\n"
+           "}\nprint(f(1));")
+    rep = analyze(src)
+    fl = by_name(rep, "f")
+    _check("复杂度：物理行=4，SLOC=2（扣除空行与注释行）",
+           fl["physical_lines"] == 4 and fl["code_lines"] == 2
+           and fl["blank_lines"] == 1 and fl["comment_lines"] == 1,
+           str((fl["physical_lines"], fl["code_lines"])))
+
+    # 7) 顶层 <main> 同样分析；整体统计与各函数一致
+    rep = analyze("var s = 0;\nfor (var i = 0; i < 3; i = i + 1) { s = s + i; }\nprint(s);")
+    main = by_name(rep, "<main>")
+    summ = rep["summary"]
+    _check("复杂度：顶层代码参与分析，整体统计与逐函数一致",
+           main["cyclomatic"] == 2 and main["loop_count"] == 1
+           and summ["cyclomatic_total"] == sum(f["cyclomatic"] for f in rep["functions"])
+           and summ["all_consistent"],
+           str((main["cyclomatic"], summ)))
 
 
 def _test_full_pipeline():

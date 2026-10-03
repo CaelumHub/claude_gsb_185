@@ -4,7 +4,7 @@ HTTP 接口服务 + 静态资源托管。
 
 纯标准库实现（``http.server.ThreadingHTTPServer``），不依赖 Flask 等第三方库。
 职责：
-  * 托管前端静态页面（frontend/ 下 10 个 HTML 页面 + css/js）；
+  * 托管前端静态页面（frontend/ 下 11 个 HTML 页面 + css/js）；
   * 提供 REST 风格的 JSON 接口，覆盖项目/版本管理、编译、运行、调试、剖析。
 
 线程池模型：每个请求一个线程，读改写 JSON 文件时依赖 storage 层的文件锁保证
@@ -150,6 +150,11 @@ class Handler(BaseHTTPRequestHandler):
         # ---- 编译 / 运行 ----
         if path == "/api/compile" and method == "POST":
             view = svc.compile_view(body.get("source", ""), body.get("detail", "all"))
+            return self._json(200, {"ok": True, "result": view})
+
+        # ---- 复杂度分析 ----
+        if path == "/api/complexity" and method == "POST":
+            view = svc.complexity_view(body.get("source", ""))
             return self._json(200, {"ok": True, "result": view})
         if path == "/api/run" and method == "POST":
             opts = body.get("options", {})

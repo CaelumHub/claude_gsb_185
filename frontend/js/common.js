@@ -21,6 +21,7 @@
     { key: "callstack",   href: "callstack.html",   icon: "📚", title: "调用栈与变量监视", group: "运行调试" },
     { key: "memory",      href: "memory.html",      icon: "🧠", title: "内存模型可视化",  group: "运行调试" },
     { key: "diagnostics", href: "diagnostics.html", icon: "🩺", title: "错误诊断与修复",  group: "分析与优化" },
+    { key: "complexity", href: "complexity.html", icon: "📊", title: "代码复杂度分析",  group: "分析与优化" },
     { key: "profile",     href: "profile.html",     icon: "📈", title: "性能分析",        group: "分析与优化" },
   ];
 
@@ -142,6 +143,9 @@
     // ---- 编译 / 运行 ----
     compile(source, detail) { return this.post("/api/compile", { source, detail: detail || "all" }); },
     run(source, options) { return this.post("/api/run", { source, options: options || {} }); },
+
+    // ---- 复杂度 ----
+    complexity(source) { return this.post("/api/complexity", { source }); },
 
     // ---- 调试 ----
     debugStart(source, breakpoints, pid, vid) { return this.post("/api/debug/start", { source, breakpoints: breakpoints || [], project_id: pid, version_id: vid }); },

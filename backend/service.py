@@ -27,6 +27,7 @@ from . import debugger as debugger_mod
 from . import profiler as profiler_mod
 from . import diagnostics as diag
 from . import memory_model
+from . import complexity as complexity_mod
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +248,22 @@ class Service:
         if detail == "all" and result.bytecode is not None:
             view["bytecode"] = result.bytecode.to_dict()
             view["bytecode"]["functions"].reverse()
+        return view
+
+    def complexity_view(self, source):
+        """基于编译产物（AST + 字节码 CFG）的代码复杂度分析结果。"""
+        result = compiler_mod.compile_source(source)
+        if not result.success:
+            return {
+                "ok": False,
+                "stage": result.stage,
+                "diagnostics": result.diagnostics.to_list(),
+                "functions": [],
+                "summary": None,
+            }
+        view = complexity_mod.analyze(result)
+        view["stage"] = result.stage
+        view["diagnostics"] = result.diagnostics.to_list()
         return view
 
     # ==================================================================

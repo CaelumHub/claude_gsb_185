@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>代码复杂度分析 · MiniLang 平台</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <div class="content">
+      <div class="flex wrap between mb">
+        <div class="flex wrap" style="gap:8px">
+          <select id="sample"></select>
+          <button class="btn sm" id="btn-loadproj">📂 载入项目源码</button>
+        </div>
+        <button class="btn primary" id="btn-analyze">📊 计算复杂度</button>
+      </div>
+
+      <div id="editor"></div>
+
+      <div id="cx-status" class="flex wrap mt" style="gap:8px;min-height:26px"></div>
+
+      <div id="results" style="display:none">
+        <!-- 整体统计 -->
+        <div class="grid cols-3 mt" id="cx-tiles"></div>
+
+        <div class="card mt">
+          <h2>📈 圈复杂度分布（按函数）</h2>
+          <div class="desc">条形长度按 McCabe 圈复杂度归一化：<span class="badge green">1–4 简单</span>
+            <span class="badge amber">5–9 中等</span>
+            <span class="badge red">≥10 高风险</span></div>
+          <div id="cx-bars"></div>
+        </div>
+
+        <div class="card mt">
+          <div class="flex between">
+            <h2>🔬 逐函数指标</h2>
+            <div class="muted" style="font-size:12px">点击函数名展开判定点明细</div>
+          </div>
+          <div style="overflow:auto">
+            <table class="cx-table">
+              <thead><tr>
+                <th>函数</th><th class="num" title="McCabe 圈复杂度：1 + 条件跳转谓词数">圈复杂度</th>
+                <th class="num" title="控制结构（if/while/for）的最大嵌套层数">最大嵌套</th>
+                <th class="num" title="物理行数（含空行注释）">物理行</th>
+                <th class="num" title="有效代码行：去掉空行与注释">SLOC</th>
+                <th class="num" title="有字节码指令的源码行数">可执行行</th>
+                <th class="num" title="不含 Block 容器的 AST 语句数">语句</th>
+                <th class="num" title="if/elif 分支">分支</th>
+                <th class="num" title="while / for 循环">循环</th>
+                <th class="num" title="&& / || 短路运算符">短路</th>
+                <th class="num" title="字节码指令条数">指令</th>
+                <th>调用 / 递归</th>
+              </tr></thead>
+              <tbody id="cx-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>📐 指标口径与计算方法</h2>
+          <div class="desc">所有指标均由<b>现有编译产物</b>计算，不引入新的解析器或第三方依赖：</div>
+          <table class="tbl" style="font-size:12.5px">
+            <tbody>
+              <tr><td style="width:150px"><b>圈复杂度 v(G)</b></td>
+                <td>从每个函数（含顶层 &lt;main&gt;）的字节码构建<b>控制流图（CFG）</b>：
+                  <code>JUMP_IF_FALSE</code> / <code>JUMP_IF_TRUE</code> 各对应一个分支谓词
+                  （if/elif、while/for 条件，以及 <code>&amp;&amp;</code> / <code>||</code> 的短路跳转），
+                  故 <code>v(G) = 1 + 谓词数</code>；同时补一个虚拟出口节点用经典公式
+                  <code>E − N + 2</code> 交叉验证，两者必须相等（逐函数有「对账」标记）。</td></tr>
+              <tr><td><b>嵌套深度</b></td>
+                <td>遍历语义分析后的 AST：进入 if/elif/else、while、for 的函数体时深度 +1，
+                  取整个函数内的最大值；条件表达式内部的 <code>&amp;&amp;</code>/<code>||</code>
+                  属于谓词而非词法嵌套，计入圈复杂度但不计嵌套深度。</td></tr>
+              <tr><td><b>行数</b></td>
+                <td>物理行＝函数 <code>func</code> 行到函数末行；SLOC 再扣除空行与
+                  <code>//</code>、<code>/* */</code> 注释行；可执行行＝该区间内带字节码指令的源码行数。</td></tr>
+              <tr><td><b>调用与递归</b></td>
+                <td>模拟栈式字节码，配对 <code>LOAD_FUNC … CALL</code> 得到用户函数调用边
+                  （内置函数不计）；对调用图求 Tarjan 强连通分量：自环＝直接递归，
+                  多节点环＝相互递归。</td></tr>
+              <tr><td><b>break / continue</b></td>
+                <td>编译为无条件跳转（JUMP），不产生新谓词，因此不增加圈复杂度，但单独计数展示。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/common.js"></script>
+<script src="js/editor.js"></script>
+<script>
+(function () {
+  ML.Shell.render("complexity");
+  ML.Shell.setTitle("代码复杂度分析");
+
+  const editor = new ML.CodeEditor(document.getElementById("editor"), {
+    value: ML.store.get("draft_source", ML.SAMPLES[2].code), height: 240,
+  });
+  const sampleSel = document.getElementById("sample");
+  sampleSel.innerHTML = '<option value="">— 载入示例 —</option>' +
+    ML.SAMPLES.map((s, i) => `<option value="${i}">${ML.escapeHtml(s.name)}</option>`).join("");
+  sampleSel.onchange = () => { if (sampleSel.value !== "") { editor.setValue(ML.SAMPLES[+sampleSel.value].code); sampleSel.value = ""; } };
+  document.getElementById("btn-loadproj").onclick = async () => editor.setValue(await ML.Shell.loadSource(ML.DEFAULT_CODE));
+
+  const esc = ML.escapeHtml;
+
+  function nestingDots(d) {
+    let html = '<span class="nest-dots" title="最大嵌套深度 ' + d + '">';
+    for (let i = 0; i < Math.max(d, 1); i++) html += `<i class="${i < d ? "on" : ""}"></i>`;
+    return html + "</span>";
+  }
+
+  function recurCell(f) {
+    if (f.recursion_type === "direct") return '🔁 <span class="badge red">直接递归</span>';
+    if (f.recursion_type === "mutual") return '🔁 <span class="badge purple">相互递归: ' + esc(f.recursion_cycle.join(" ↔ ")) + "</span>";
+    if (!f.calls.length) return '<span class="muted">—</span>';
+    return esc(f.calls.map((c) => `${c.name}×${c.count}`).join("、"));
+  }
+
+  function decisionChips(f) {
+    if (!f.decisions.length) return '<div class="muted" style="font-size:12px">无分支谓词（线性控制流，v(G)=1）</div>';
+    return '<div class="cx-chips">' + f.decisions.map((d) => {
+      const text = d.kind === "logical"
+        ? `L${d.line} ${d.label}（${d.op}）`
+        : `L${d.line} ${d.label}`;
+      return `<span class="cx-chip ${d.kind}" title="${esc(d.label)}">${esc(text)}</span>`;
+    }).join("") + "</div>";
+  }
+
+  function renderTiles(s) {
+    const tiles = [
+      [s.segment_count, "分析代码段（含 <main>）"],
+      [s.function_count, "用户函数"],
+      [s.cyclomatic_total, "圈复杂度总和"],
+      [s.cyclomatic_max, "单函数最大圈复杂度"],
+      [s.cyclomatic_avg, "平均圈复杂度"],
+      [s.max_nesting, "最大嵌套深度"],
+      [s.total_code_lines, "SLOC 有效代码行"],
+      [s.total_statements, "语句总数"],
+      [s.total_decisions, "分支谓词总数"],
+    ];
+    const recurNames = s.recursive_functions.length ? s.recursive_functions.join("、") : "无";
+    const recurColor = s.recursive_count ? "primary" : "success";
+    const recurTile = '<div class="stat-tile"><div class="v" style="color:var(--' +
+      recurColor + ')">' + s.recursive_count + '</div><div class="k">递归函数（' +
+      esc(recurNames) + "）</div></div>";
+    document.getElementById("cx-tiles").innerHTML =
+      tiles.map(([v, k]) => `<div class="stat-tile"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("") +
+      recurTile;
+  }
+
+  function renderBars(fns) {
+    const max = Math.max(1, ...fns.map((f) => f.cyclomatic));
+    document.getElementById("cx-bars").innerHTML = fns.map((f) => {
+      const pct = f.cyclomatic / max * 100;
+      const label = f.is_main ? "&lt;main&gt;（顶层）" : `${esc(f.name)}(${esc(f.params.join(", "))})`;
+      return `<div class="cx-bar-row">
+        <div class="lbl" title="${label}">${label}</div>
+        <div class="track"><div class="fill ${f.rating}" style="width:${pct}%"></div></div>
+        <div class="pct">v(G)=${f.cyclomatic} · ${esc(f.rating_label)}</div>
+      </div>`;
+    }).join("");
+  }
+
+  function renderTable(fns) {
+    const body = document.getElementById("cx-body");
+    body.innerHTML = fns.map((f, i) => {
+      const label = f.is_main ? "&lt;main&gt;" : esc(f.name);
+      const sig = f.is_main ? "顶层语句" : `(${esc(f.params.join(", "))})`;
+      const rowCls = f.rating === "high" ? "row-high" : f.rating === "medium" ? "row-medium" : "";
+      return `<tr class="${rowCls}">
+        <td class="fnname" data-i="${i}">${label} <span class="muted" style="font-weight:400;font-size:11px">${sig} · L${f.start_line}–${f.end_line}</span></td>
+        <td class="num"><span class="cx-vg ${f.rating}" title="CFG: E−N+2 = ${f.cyclomatic_cfg}，与谓词计数法对账">${f.cyclomatic}</span>
+          ${f.metrics_consistent ? '<span title="谓词计数法与 E−N+2 公式结果一致">✓</span>' : '<span class="badge red" title="两种算法结果不一致">!</span>'}</td>
+        <td class="num">${nestingDots(f.max_nesting)} <span class="muted">${f.max_nesting}</span></td>
+        <td class="num">${f.physical_lines}</td>
+        <td class="num">${f.code_lines}</td>
+        <td class="num">${f.executable_lines}</td>
+        <td class="num">${f.statement_count}</td>
+        <td class="num">${f.if_branches}</td>
+        <td class="num">${f.loop_count}</td>
+        <td class="num">${f.logical_count}</td>
+        <td class="num">${f.instruction_count}</td>
+        <td>${recurCell(f)}</td>
+      </tr>
+      <tr class="cx-detail-row" data-i="${i}" style="display:none"><td colspan="12" style="padding:0;border-bottom:1px solid var(--border-strong)">
+        <div style="padding:10px 14px;background:var(--surface-2)">
+          <div class="muted" style="font-size:12px;margin-bottom:4px">
+            CFG：${f.cfg_blocks} 个基本块 · ${f.cfg_nodes} 个节点（含虚拟出口）· ${f.cfg_edges} 条边 ·
+            谓词 ${f.predicate_count}（分支 ${f.predicate_breakdown.branch} ＋ 循环 ${f.predicate_breakdown.loop}
+            ＋ 短路 ${f.predicate_breakdown.logical}）
+            · return ${f.return_count} · break ${f.break_count} · continue ${f.continue_count}
+            · 用户函数调用点 ${f.call_sites}
+          </div>
+          ${decisionChips(f)}
+        </div>
+      </td></tr>`;
+    }).join("");
+    body.querySelectorAll("td.fnname").forEach((td) => {
+      td.onclick = () => {
+        const dr = body.querySelector(`tr.cx-detail-row[data-i="${td.dataset.i}"]`);
+        if (dr) dr.style.display = dr.style.display === "none" ? "" : "none";
+      };
+    });
+  }
+
+  async function analyze() {
+    const code = editor.getValue();
+    const data = await ML.api.complexity(code);
+    const r = data.result || {};
+    const status = document.getElementById("cx-status");
+    const results = document.getElementById("results");
+    if (!r.ok) {
+      results.style.display = "none";
+      status.innerHTML = `<span class="empty" style="padding:8px">🚫 编译未通过，无法进行复杂度分析 · <a href="diagnostics.html">查看诊断</a></span>`;
+      return;
+    }
+    results.style.display = "";
+    const fns = r.functions || [];
+    const s = r.summary;
+    status.innerHTML =
+      ML.badge("分析代码段 " + s.segment_count, "blue") +
+      ML.badge("函数 " + s.function_count, "blue") +
+      ML.badge("SLOC " + s.total_code_lines, "gray") +
+      ML.badge("语句 " + s.total_statements, "gray") +
+      ML.badge("谓词 " + s.total_decisions, "gray") +
+      (s.recursive_count ? ML.badge("递归函数 " + s.recursive_count, "purple") : ML.badge("无递归", "green")) +
+      (s.all_consistent
+        ? ML.badge("✓ CFG 双算法对账一致", "green")
+        : ML.badge("⚠ 存在对账不一致", "red"));
+    renderTiles(s);
+    renderBars(fns);
+    renderTable(fns);
+  }
+
+  document.getElementById("btn-analyze").onclick = analyze;
+})();
+</script>
+</body>
+</html>
